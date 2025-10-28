@@ -5,7 +5,7 @@ from http import HTTPStatus
 from typing import Any, ClassVar, TypeAlias, final
 
 import pydantic
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 
 from django_modern_rest import (
@@ -19,6 +19,7 @@ from django_modern_rest import (
     wrap_middleware,
 )
 from django_modern_rest.plugins.pydantic import PydanticSerializer
+from django_modern_rest.response import build_response
 from server.apps.rest.middleware import (
     custom_header_middleware,
     rate_limit_middleware,
@@ -35,9 +36,10 @@ _CallableAny: TypeAlias = Callable[..., Any]
     ),
 )
 def csrf_protect_json(response: HttpResponse) -> HttpResponse:
-    return JsonResponse(
-        {'detail': 'CSRF verification failed. Request aborted.'},
-        status=HTTPStatus.FORBIDDEN,
+    return build_response(
+        PydanticSerializer,
+        raw_data={'detail': 'CSRF verification failed. Request aborted.'},
+        status_code=HTTPStatus.FORBIDDEN,
     )
 
 
@@ -155,7 +157,7 @@ class UserReplaceController(
         ),
     )
     async def put(self) -> HttpResponse:
-        return JsonResponse({
+        return self.to_response({
             'email': 'new@email.com',
             'age': self.parsed_path.user_id,
         })
@@ -184,9 +186,9 @@ class AsyncParseHeadersController(
 class CsrfTokenController(Controller[PydanticSerializer]):
     """Controller to obtain CSRF token."""
 
-    # We don't add `ensure_csrf_cookie_json.responses`,
-    # because it always returns ones we already have
-    # TODO: We need a special flag for Controller.deduplicate_responses
+    responses: ClassVar[list[ResponseDescription]] = (
+        ensure_csrf_cookie_json.responses
+    )
 
     def get(self) -> dict[str, str]:
         """GET endpoint that ensures CSRF cookie is set."""
@@ -224,6 +226,10 @@ class AsyncCsrfProtectedController(
 class CustomHeaderController(Controller[PydanticSerializer]):
     """Controller with custom header middleware."""
 
+    responses: ClassVar[list[ResponseDescription]] = (
+        custom_header_json.responses
+    )
+
     def get(self) -> dict[str, str]:
         """GET endpoint that returns simple data."""
         return {'message': 'Success'}
@@ -236,6 +242,8 @@ class RateLimitedController(
     Controller[PydanticSerializer],
 ):
     """Controller with rate limiting middleware."""
+
+    responses: ClassVar[list[ResponseDescription]] = rate_limit_json.responses
 
     def post(self) -> _UserInput:
         """POST endpoint with rate limiting."""

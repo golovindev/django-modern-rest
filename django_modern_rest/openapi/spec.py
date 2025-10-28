@@ -3,16 +3,21 @@ from collections.abc import Sequence
 from django.urls import URLPattern, path
 
 from django_modern_rest.openapi.config import OpenAPIConfig
+from django_modern_rest.openapi.converter import (
+    ConvertedSchema,
+    SchemaConverter,
+)
+from django_modern_rest.openapi.core.builder import OpenApiBuilder
+from django_modern_rest.openapi.core.context import OpenAPIContext
 from django_modern_rest.openapi.renderers import BaseRenderer
 from django_modern_rest.openapi.views import OpenAPIView
 from django_modern_rest.routing import Router
-from django_modern_rest.types import Empty, EmptyObj
 
 
 def openapi_spec(
     router: Router,
     renderers: Sequence[BaseRenderer],
-    config: OpenAPIConfig | Empty = EmptyObj,
+    config: OpenAPIConfig | None = None,
     app_name: str = 'openapi',
     namespace: str = 'docs',
 ) -> tuple[list[URLPattern], str, str]:
@@ -25,44 +30,42 @@ def openapi_spec(
     """
     if len(renderers) == 0:
         raise ValueError(
-            "Empty renderers sequence provided to 'openapi_spec()'. "
+            'Empty renderers sequence provided to `openapi_spec()`. '
             'At least one renderer must be specified to '
             'render the API documentation.',
         )
 
-    if isinstance(config, Empty):
-        config = _default_config()
+    schema = _build_schema(config or _default_config(), router)
 
-    # TODO: temporary schema without content
-    schema = {
-        'openapi': '3.1.0',
-        'info': {
-            'title': 'Minimal API',
-            'version': '1.0.0',
-        },
-    }
+    urlpatterns: list[URLPattern] = []
+    for renderer in renderers:
+        view = OpenAPIView.as_view(renderer=renderer, schema=schema)
+        if renderer.decorators:
+            for decorator in renderer.decorators:
+                view = decorator(view)
 
-    urlpatterns = [
-        path(
-            renderer.path,
-            OpenAPIView.as_view(renderer=renderer, schema=schema),
-            name=renderer.name,
-        )
-        for renderer in renderers
-    ]
+        urlpatterns.append(path(renderer.path, view, name=renderer.name))
+
     return (urlpatterns, app_name, namespace)
 
 
 def _default_config() -> OpenAPIConfig:
     from django_modern_rest.settings import (  # noqa: PLC0415
         DMR_OPENAPI_CONFIG_KEY,
-        resolve_defaults,
+        resolve_setting,
     )
 
-    config = resolve_defaults().get(DMR_OPENAPI_CONFIG_KEY)
+    config = resolve_setting(DMR_OPENAPI_CONFIG_KEY)
     if not isinstance(config, OpenAPIConfig):
         raise TypeError(
-            'OpenAPI config is not set. Please set the '
-            "'DMR_OPENAPI_CONFIG' setting.",
+            'OpenAPI config is not set. Please, set the '
+            f'{DMR_OPENAPI_CONFIG_KEY!r} setting.',
         )
     return config
+
+
+def _build_schema(config: OpenAPIConfig, router: Router) -> ConvertedSchema:
+    # TODO: refactor
+    context = OpenAPIContext(config=config)
+    schema = OpenApiBuilder(context).build(router)
+    return SchemaConverter.convert(schema)

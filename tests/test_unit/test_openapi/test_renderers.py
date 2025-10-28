@@ -1,11 +1,15 @@
 import json
 from http import HTTPStatus
-from typing import Final
+from typing import Any, Final
 
 import pytest
+from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
+from django.views.decorators.cache import cache_page
+from django.views.decorators.csrf import csrf_exempt
 
 from django_modern_rest.openapi.converter import ConvertedSchema
+from django_modern_rest.openapi.objects.open_api import _OPENAPI_VERSION
 from django_modern_rest.openapi.renderers import (
     BaseRenderer,
     JsonRenderer,
@@ -17,7 +21,7 @@ from django_modern_rest.openapi.renderers import (
 from django_modern_rest.test import DMRRequestFactory
 
 _TEST_SCHEMA: Final[ConvertedSchema] = {  # noqa: WPS407
-    'openapi': '3.1.0',
+    'openapi': _OPENAPI_VERSION,
     'info': {'title': 'Test API', 'version': '1.0.0'},
     'paths': {
         '/test/': {
@@ -125,3 +129,24 @@ def test_html_renderer_render_method(
     assert response.status_code == HTTPStatus.OK
     assert response['Content-Type'] == 'text/html'
     assert '<html' in response.content.decode('utf-8').lower()
+
+
+@pytest.mark.parametrize(
+    ('decorators', 'expected_len'),
+    [
+        ([], 0),
+        ([csrf_exempt], 1),
+        ([login_required, cache_page(10)], 2),
+        ([csrf_exempt, login_required], 2),
+    ],
+)
+def test_renderer_with_simple_decorators(
+    *,
+    decorators: list[Any] | None,
+    expected_len: int | None,
+) -> None:
+    """Ensure that simple Django decorators work with renderers."""
+    renderer = JsonRenderer(decorators=decorators)
+
+    assert isinstance(renderer.decorators, list)
+    assert len(renderer.decorators) == expected_len

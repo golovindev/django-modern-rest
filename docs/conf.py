@@ -103,11 +103,20 @@ nitpick_ignore = [
     (PY_CLASS, 'django_modern_rest.endpoint._ModifyAsyncCallable'),
     (PY_CLASS, 'django_modern_rest.endpoint._ModifySyncCallable'),
     (PY_CLASS, '_ParamT'),
+    (PY_CLASS, 'django_modern_rest.response._ItemT'),
     (PY_CLASS, 'django_modern_rest.internal.middleware_wrapper._TypeT'),
     (PY_CLASS, '_SerializerT'),
     # Undocumented in Django:
     (PY_CLASS, 'django.urls.resolvers.URLPattern'),
     (PY_CLASS, 'django.urls.resolvers.URLResolver'),
+    # OpenAPI types used in TYPE_CHECKING blocks:
+    (PY_CLASS, 'SecurityRequirement'),
+    (PY_CLASS, 'ExternalDocumentation'),
+    (PY_CLASS, 'Callback'),
+    (PY_CLASS, 'Server'),
+    (PY_CLASS, 'Reference'),
+    (PY_CLASS, 'Paths'),
+    (PY_CLASS, 'Responses'),
 ]
 
 qualname_overrides = {
@@ -115,7 +124,6 @@ qualname_overrides = {
     'django.http.request.HttpRequest': 'django:django.http.HttpRequest',
     'django.http.response.HttpResponse': 'django:django.http.HttpResponse',
 }
-
 
 # Set `typing.TYPE_CHECKING` to `True`:
 # https://pypi.org/project/sphinx-autodoc-typehints/

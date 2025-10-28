@@ -1,14 +1,15 @@
 import abc
 from collections.abc import Callable
-from typing import ClassVar, TypeAlias
+from typing import Any, ClassVar, TypeAlias
 
 from django.http import HttpRequest, HttpResponse
 
 from django_modern_rest.openapi.converter import ConvertedSchema
-from django_modern_rest.types import Empty, EmptyObj
 
 SerializedSchema: TypeAlias = str
 SchemaSerialier: TypeAlias = Callable[[ConvertedSchema], SerializedSchema]
+_CallableAny: TypeAlias = Callable[..., Any]
+_ViewDecorator: TypeAlias = Callable[[_CallableAny], _CallableAny]
 
 
 def json_serializer(schema: ConvertedSchema) -> SerializedSchema:
@@ -42,19 +43,20 @@ class BaseRenderer:
     and define default configuration values.
 
     Attributes:
-        default_path: Default URL path for the renderer endpoint.
-        default_name: Default name identifier for the renderer.
+        path: URL path for the renderer endpoint.
+        name: Name identifier for the renderer.
+        decorators: List of decorators to apply to the renderer.
         content_type: MIME type of the rendered content.
         serializer: Function to convert schema to serialized format.
     """
 
     __slots__ = (
         'content_type',
+        'decorators',
         'name',
         'path',
         'serializer',
     )
-
     default_path: ClassVar[str]
     default_name: ClassVar[str]
     content_type: ClassVar[str]
@@ -63,18 +65,21 @@ class BaseRenderer:
     def __init__(
         self,
         *,
-        path: str | Empty = EmptyObj,
-        name: str | Empty = EmptyObj,
+        path: str | None = None,
+        name: str | None = None,
+        decorators: list[_ViewDecorator] | None = None,
     ) -> None:
         """
-        Initialize renderer with optional custom path and name.
+        Initialize renderer with optional parameters.
 
         Args:
             path: Custom URL path, uses `default_path` if not provided.
             name: Custom name identifier, uses `default_name` if not provided.
+            decorators: List of decorators to apply to the renderer.
         """
-        self.path = self.default_path if isinstance(path, Empty) else path
-        self.name = self.default_name if isinstance(name, Empty) else name
+        self.path = self.default_path if path is None else path
+        self.name = self.default_name if name is None else name
+        self.decorators = decorators
 
     @abc.abstractmethod
     def render(
@@ -86,10 +91,10 @@ class BaseRenderer:
         Render OpenAPI schema into HTTP response.
 
         Args:
-            request: Django HTTP request object.
+            request: Django `HttpRequest` object.
             schema: Converted OpenAPI schema to render.
 
         Returns:
-            Django HTTP response with rendered content.
+            Django `HttpResponse` with rendered content.
         """
         raise NotImplementedError

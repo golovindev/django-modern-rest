@@ -19,11 +19,12 @@ from django_modern_rest.exceptions import (
     UnsolvableAnnotationsError,
 )
 from django_modern_rest.internal.io import identity
-from django_modern_rest.response import ResponseDescription, build_response
+from django_modern_rest.response import (
+    ResponseDescription,
+    build_response,
+)
 from django_modern_rest.serialization import BaseSerializer, SerializerContext
 from django_modern_rest.types import (
-    Empty,
-    EmptyObj,
     infer_bases,
     infer_type_args,
 )
@@ -88,7 +89,7 @@ class Controller(View, Generic[_SerializerT_co]):  # noqa: WPS214
     )
     # str and not HTTPMethod, because of `meta` method:
     api_endpoints: ClassVar[dict[str, Endpoint]]
-    validate_responses: ClassVar[bool | Empty] = EmptyObj
+    validate_responses: ClassVar[bool | None] = None
     responses: ClassVar[list[ResponseDescription]] = []
     responses_from_components: ClassVar[bool] = True
     http_methods: ClassVar[frozenset[str]] = frozenset(
@@ -139,8 +140,8 @@ class Controller(View, Generic[_SerializerT_co]):  # noqa: WPS214
         self,
         raw_data: Any,
         *,
-        headers: dict[str, str] | Empty = EmptyObj,
-        status_code: HTTPStatus | Empty = EmptyObj,
+        headers: dict[str, str] | None = None,
+        status_code: HTTPStatus | None = None,
     ) -> HttpResponse:
         """
         Helpful method to convert response parts into an actual response.
@@ -153,8 +154,8 @@ class Controller(View, Generic[_SerializerT_co]):  # noqa: WPS214
         # For mypy: this can't be `None` at this point.
         assert self.request.method  # noqa: S101
         return build_response(
-            self.request.method,
             self.serializer,
+            method=self.request.method,
             raw_data=raw_data,
             headers=headers,
             status_code=status_code,
@@ -165,7 +166,7 @@ class Controller(View, Generic[_SerializerT_co]):  # noqa: WPS214
         raw_data: Any,
         *,
         status_code: HTTPStatus,
-        headers: dict[str, str] | Empty = EmptyObj,
+        headers: dict[str, str] | None = None,
     ) -> HttpResponse:
         """
         Helpful method to convert API error parts into an actual error.
@@ -177,8 +178,7 @@ class Controller(View, Generic[_SerializerT_co]):  # noqa: WPS214
         Does the usual validation, no "second validation" problem exists.
         """
         return build_response(
-            method=None,
-            serializer=self.serializer,
+            self.serializer,
             raw_data=raw_data,
             headers=headers,
             status_code=status_code,
@@ -357,7 +357,6 @@ class Controller(View, Generic[_SerializerT_co]):  # noqa: WPS214
         allowed_methods = sorted(cls.api_endpoints.keys())
         return cls._maybe_wrap(
             build_response(
-                None,
                 cls.serializer,
                 raw_data={
                     'detail': (

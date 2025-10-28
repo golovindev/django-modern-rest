@@ -1,4 +1,4 @@
-Core Concepts
+Core concepts
 =============
 
 To learn ``django-modern-rest`` you have to learn just a couple of things:
@@ -31,13 +31,14 @@ To learn ``django-modern-rest`` you have to learn just a couple of things:
   Serializer
     :class:`~django_modern_rest.serialization.BaseSerializer` subclass
     that knows how to load and dump raw data into models.
-    We have 2 bundled serializers in :ref:`plugins`\ : for ``pydantic``
-    and ``msgspec``, you can write your own serializers for other libraries.
+    We have 2 bundled serializers in :doc:`plugins <plugins>`\ :
+    for ``pydantic`` and ``msgspec``, you can write your
+    own serializers for other libraries.
 
   Routing
     Routing is a mapping of URLs to controllers.
     If some controllers need the same URLs, but different data parsing, we can
-    :func:`compose <django_modern_rest.routing.compose_controllers>` them.
+    :doc:`compose <routing>` them.
 
 Example:
 
@@ -47,18 +48,48 @@ Example:
   :lines: 10-
 
 
-.. _plugins:
+Async vs Sync
+-------------
 
-Plugins
--------
+We support both Django modes: sync and async, the same way regular Django
+`supports <https://docs.djangoproject.com/en/latest/topics/async/>`_ them.
 
-
-Routing
--------
+We don't do anything special with the async mode, so any existing
+guides, tools, deployment strategies should
+just work with ``django_modern_rest`` if they work for Django.
 
 
 Maximum integration with Django
 -------------------------------
 
+We try to keep Django compatibility as our main goal.
+Everything should work by default, starting
+from `django-cors-headers <https://pypi.org/project/django-cors-headers>`_
+up to `django-ratelimit <https://pypi.org/project/django-ratelimit>`_.
+
+We also provide :doc:`middleware` wrapper tools to convert any middleware
+response to the required API schema and set needed ``Content-Type``, etc.
+
 Works best with `django-stubs <https://github.com/typeddjango/django-stubs>`_.
 Read next: our :doc:`integrations` guide.
+
+
+Next up
+-------
+
+.. grid:: 1 1 2 2
+    :class-row: surface
+    :padding: 0
+    :gutter: 2
+
+    .. grid-item-card:: :octicon:`rocket` Using Controller
+      :link: using-controller
+      :link-type: doc
+
+      Learn how controllers work.
+
+    .. grid-item-card:: :octicon:`gear` Configuration
+      :link: configuration
+      :link-type: doc
+
+      Learn how to configure ``django-modern-rest``.

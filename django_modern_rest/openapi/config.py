@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from django_modern_rest.openapi.objects import (  # noqa: WPS235d
+from django_modern_rest.openapi.objects import (  # noqa: WPS235
     Components,
     Contact,
     ExternalDocumentation,
@@ -37,5 +37,4 @@ class OpenAPIConfig:
     components: Components | list[Components] | None = None
     servers: list[Server] | None = None
     tags: list[Tag] | None = None
-    use_handler_docstrings: bool = False
     webhooks: dict[str, PathItem | Reference] | None = None

@@ -1,6 +1,6 @@
 import json
 from http import HTTPMethod, HTTPStatus
-from typing import Generic, Literal, TypeVar, final
+from typing import ClassVar, Generic, Literal, TypeVar, final
 
 import pytest
 from django.http import HttpResponse
@@ -175,6 +175,46 @@ def test_validate_required_for_responses() -> None:
                 raise NotImplementedError
 
 
+class _NoExplicitDecorator(Controller[PydanticSerializer]):
+    responses: ClassVar[list[ResponseDescription]] = [
+        ResponseDescription(list[int], status_code=HTTPStatus.OK),
+    ]
+
+    def get(self) -> HttpResponse:  # valid
+        return self.to_response([1, 2])
+
+    def put(self) -> HttpResponse:  # invalid
+        return self.to_response(['a'])
+
+
+def test_no_validate_for_responses(dmr_rf: DMRRequestFactory) -> None:
+    """Ensures `@validate` can be skipped, when there are existing responses."""
+    request = dmr_rf.get('/whatever/')
+
+    response = _NoExplicitDecorator.as_view()(request)
+
+    assert isinstance(response, HttpResponse)
+    assert response.status_code == HTTPStatus.OK
+    assert json.loads(response.content) == [1, 2]
+
+    request = dmr_rf.put('/whatever/')
+
+    response = _NoExplicitDecorator.as_view()(request)
+
+    assert isinstance(response, HttpResponse)
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+    assert json.loads(response.content) == snapshot({
+        'detail': [
+            {
+                'type': 'int_type',
+                'loc': [0],
+                'msg': 'Input should be a valid integer',
+                'input': 'a',
+            },
+        ],
+    })
+
+
 def test_validate_on_non_response() -> None:
     """Ensures `@validate` can't be used on regular return types."""
     with pytest.raises(EndpointMetadataError, match='@validate'):
@@ -192,7 +232,7 @@ def test_validate_on_non_response() -> None:
 
 def test_validate_duplicate_statuses() -> None:
     """Ensures `@validate` can't have duplicate status codes."""
-    with pytest.raises(EndpointMetadataError, match='2 times'):
+    with pytest.raises(EndpointMetadataError, match='different metadata'):
 
         class _DuplicateStatuses(Controller[PydanticSerializer]):
             @validate(
