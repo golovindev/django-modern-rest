@@ -12,8 +12,13 @@
 
 import sys
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
+
+from docutils.nodes import Node
+from sphinx.addnodes import pending_xref
+from sphinx.application import Sphinx
 
 # We need `server` to be importable from here:
 _ROOT = Path('..').resolve(strict=True)
@@ -59,12 +64,15 @@ extensions = [
     # https://github.com/executablebooks/MyST-Parser
     'myst_parser',
     # 3rd party, order matters:
+    'auto_pytabs.sphinx_ext',
     'sphinx_design',
     'sphinx_copybutton',
     'sphinx_contributors',
     'sphinx_tabs.tabs',
     'sphinx_iconify',
     'sphinxcontrib.mermaid',
+    # custom extensions
+    'docs.tools.sphinx_ext',
 ]
 
 
@@ -98,11 +106,35 @@ nitpick_ignore = [
     (PY_CLASS, 'django_modern_rest.endpoint._ModifyAsyncCallable'),
     (PY_CLASS, 'django_modern_rest.endpoint._ModifySyncCallable'),
     (PY_CLASS, '_ParamT'),
+    (PY_CLASS, 'django_modern_rest.response._ItemT'),
     (PY_CLASS, 'django_modern_rest.internal.middleware_wrapper._TypeT'),
-    # TODO: fix out why this is an error
-    (PY_CLASS, 'django.http.response.HttpResponse'),
-    (PY_CLASS, 'django.http.request.HttpRequest'),
+    (PY_CLASS, '_SerializerT'),
+    (PY_CLASS, '_BlueprintT'),
+    (PY_CLASS, 'django_modern_rest.decorators._ReturnT'),
+    (PY_CLASS, 'django_modern_rest.decorators._ViewT'),
+    (PY_CLASS, 'django_modern_rest.decorators._TypeT'),
+    ('py:obj', 'django_modern_rest.controller._SerializerT_co'),
+    # Undocumented in Django:
+    (PY_CLASS, 'django.urls.resolvers.URLPattern'),
+    (PY_CLASS, 'django.urls.resolvers.URLResolver'),
+    # OpenAPI types used in TYPE_CHECKING blocks:
+    (PY_CLASS, 'SecurityRequirement'),
+    (PY_CLASS, 'ExternalDocumentation'),
+    (PY_CLASS, 'Callback'),
+    (PY_CLASS, 'Server'),
+    (PY_CLASS, 'Reference'),
+    (PY_CLASS, 'Paths'),
+    (PY_CLASS, 'Responses'),
 ]
+
+qualname_overrides = {
+    # Django documents these classes under re-exported path names:
+    'django.http.request.HttpRequest': 'django:django.http.HttpRequest',
+    'django.http.response.HttpResponse': 'django:django.http.HttpResponse',
+    'django.http.response.HttpResponseBase': (
+        'django:django.http.HttpResponseBase'
+    ),
+}
 
 # Set `typing.TYPE_CHECKING` to `True`:
 # https://pypi.org/project/sphinx-autodoc-typehints/
@@ -142,6 +174,12 @@ html_theme_options = {
     'github_url': 'https://github.com/wemake-services/django-modern-rest',
     'readthedocs_url': 'https://django-modern-rest.readthedocs.io',
     'globaltoc_expand_depth': 1,
+    'nav_links': [
+        {
+            'title': 'Ask DeepWiki',
+            'url': 'https://deepwiki.com/wemake-services/django-modern-rest',
+        },
+    ],
     'accent_color': 'green',
     'light_logo': '_static/images/logo-light.svg',
     'dark_logo': '_static/images/logo-dark.svg',
@@ -152,9 +190,53 @@ html_context = {
     'source_type': 'github',
     'source_user': 'wemake-services',
     'source_repo': 'django-modern-rest',
+    'source_version': 'master',
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
+html_js_files = [
+    'https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js',
+]
+
+
+def resolve_canonical_names(app: Sphinx, doctree: Node) -> None:
+    """Resolve canonical names of types to names that resolve in intersphinx.
+
+    Projects often document functions/classes under a name that is re-exported.
+    For example, cryptography documents "Certificate"
+    under ``cryptography.x509.Certificate``, but it's actually implemented in
+    ``cryptography.x509.base.Certificate`` (and re-exported in x509.py).
+
+    When Sphinx encounters typehints it tries to create links to the types,
+    looking up types from external projects using ``sphinx.ext.intersphinx``.
+    The lookup for such re-exported types fails because Sphinx
+    tries to look up the object in the implemented ("canonical") location.
+
+    .. seealso::
+
+        * https://github.com/sphinx-doc/sphinx/issues/4826 - solves this
+            with the "canonical" directive
+        * https://github.com/pyca/cryptography/pull/7938 - where this
+            was fixed for cryptography
+        * https://www.sphinx-doc.org/en/master/extdev/appapi.html#events
+        * https://stackoverflow.com/a/62301461 - source of this hack
+
+    """
+    pending_xrefs: Iterable[pending_xref] = doctree.findall(
+        condition=pending_xref,
+    )
+    for node in pending_xrefs:
+        alias = node.get('reftarget')
+        if alias is None:
+            continue
+
+        if alias in qualname_overrides:
+            node['reftarget'] = qualname_overrides.get(alias)
+
+
+def setup(app: Sphinx) -> None:
+    """Add hook functions to Sphinx hooks."""
+    app.connect('doctree-read', resolve_canonical_names)

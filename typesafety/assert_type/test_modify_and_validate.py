@@ -5,9 +5,9 @@ from django.http import HttpResponse, JsonResponse
 
 from django_modern_rest import (
     Controller,
-    HeaderDescription,
+    HeaderSpec,
     NewHeader,
-    ResponseDescription,
+    ResponseSpec,
     modify,
     validate,
 )
@@ -19,41 +19,53 @@ class _Model(pydantic.BaseModel):
 
 
 class _CorrectModifyController(Controller[PydanticSerializer]):
-    @modify(status_code=HTTPStatus.OK)
+    @modify(status_code=HTTPStatus.OK, description='Test GET endpoint')
     def get(self) -> str:
         return 'Done'
 
-    @modify(status_code=HTTPStatus.OK)
+    @modify(status_code=HTTPStatus.OK, description='Test POST endpoint')
     async def post(self) -> int:
         return 1
 
-    @modify(headers={'X-Custom': NewHeader(value='Example')})
+    @modify(
+        headers={
+            'X-Custom': NewHeader(
+                value='Example',
+                description='Header test description',
+            ),
+        },
+        description='Test PATCH endpoint',
+    )
     def patch(self) -> int:
         return 1
 
-    @modify()  # no args
+    @modify(description='Test PUT endpoint')  # no args
     async def put(self) -> int:
         return 1
 
 
 class _CorrectValidateController(Controller[PydanticSerializer]):
     @validate(
-        ResponseDescription(status_code=HTTPStatus.OK, return_type=_Model),
+        ResponseSpec(status_code=HTTPStatus.OK, return_type=_Model),
     )
     def get(self) -> HttpResponse:
         return HttpResponse()
 
     @validate(
-        ResponseDescription(return_type=list[int], status_code=HTTPStatus.OK),
+        ResponseSpec(return_type=list[int], status_code=HTTPStatus.OK),
     )
     async def post(self) -> JsonResponse:
         return JsonResponse([])
 
     @validate(
-        ResponseDescription(
+        ResponseSpec(
             return_type=list[int],
             status_code=HTTPStatus.OK,
-            headers={'X-Custom': HeaderDescription()},
+            headers={
+                'X-Custom': HeaderSpec(
+                    description='Header test description',
+                ),
+            },
         ),
     )
     async def put(self) -> JsonResponse:
@@ -73,31 +85,31 @@ class _WrongModifyController(Controller[PydanticSerializer]):
     def put(self) -> HttpResponse:
         return HttpResponse()
 
-    @modify(headers={'X-Custom': HeaderDescription()})  # type: ignore[dict-item]
+    @modify(headers={'X-Custom': HeaderSpec()})  # type: ignore[dict-item]
     def patch(self) -> int:
         return 1
 
 
 class _WrongValidateController(Controller[PydanticSerializer]):
     @validate(  # type: ignore[type-var]
-        ResponseDescription(status_code=HTTPStatus.OK, return_type=_Model),
+        ResponseSpec(status_code=HTTPStatus.OK, return_type=_Model),
     )
     def get(self) -> int:
         return 1
 
     @validate(  # type: ignore[type-var]
-        ResponseDescription(return_type=list[int], status_code=HTTPStatus.OK),
+        ResponseSpec(return_type=list[int], status_code=HTTPStatus.OK),
     )
     async def post(self) -> str:
         return 'a'
 
     # Not enough params:
-    @validate(ResponseDescription(return_type=list[int]))  # type: ignore[call-arg]
+    @validate(ResponseSpec(return_type=list[int]))  # type: ignore[call-arg]
     async def put(self) -> JsonResponse:
         return JsonResponse([])
 
     @validate(
-        ResponseDescription(
+        ResponseSpec(
             return_type=list[int],
             status_code=HTTPStatus.OK,
             headers={'X-Custom': NewHeader(value=1)},  # type: ignore[dict-item, arg-type]

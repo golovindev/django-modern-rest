@@ -1,5 +1,5 @@
 from collections.abc import Callable, Mapping
-from functools import cache
+from functools import lru_cache
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -32,8 +32,8 @@ from django_modern_rest.serialization import (
     BaseSerializer,
 )
 from django_modern_rest.settings import (
-    DMR_DESERIALIZE_KEY,
-    DMR_SERIALIZE_KEY,
+    MAX_CACHE_SIZE,
+    Settings,
     resolve_setting,
 )
 
@@ -158,7 +158,7 @@ class PydanticSerializer(BaseSerializer):
     @classmethod
     def serialize(cls, structure: Any) -> bytes:
         """Convert any object to json bytestring."""
-        serialize = resolve_setting(DMR_SERIALIZE_KEY, import_string=True)
+        serialize = resolve_setting(Settings.serialize, import_string=True)
         try:
             return serialize(  # type: ignore[no-any-return]
                 structure,
@@ -183,7 +183,7 @@ class PydanticSerializer(BaseSerializer):
 
         TypeAdapter used for type validation is cached for further uses.
         """
-        deserialize = resolve_setting(DMR_DESERIALIZE_KEY, import_string=True)
+        deserialize = resolve_setting(Settings.deserialize, import_string=True)
         return deserialize(
             buffer,
             cls.deserialize_hook,
@@ -231,7 +231,16 @@ class PydanticSerializer(BaseSerializer):
     @override
     @classmethod
     def error_serialize(cls, error: Exception | str) -> Any:
-        """Serialize an exception to json the best way possible."""
+        """
+        Convert serialization or deserialization error to json format.
+
+        Args:
+            error: A serialization exception like a validation error or
+                a ``django_modern_rest.exceptions.DataParsingError``.
+
+        Returns:
+            Simple python object - exception converted to json.
+        """
         if isinstance(error, str):
             error = pydantic.ValidationError.from_exception_data(
                 error,
@@ -246,10 +255,12 @@ class PydanticSerializer(BaseSerializer):
             )
         if isinstance(error, pydantic.ValidationError):
             return error.errors(include_url=False)
-        raise NotImplementedError(f'Cannot serialize {error} to json safely')
+        raise NotImplementedError(
+            f'Cannot serialize {error!r} of type {type(error)} to json safely',
+        )
 
 
-@cache
+@lru_cache(maxsize=MAX_CACHE_SIZE)
 def _get_cached_type_adapter(model: Any) -> pydantic.TypeAdapter[Any]:
     """
     It is expensive to create, reuse existing ones.

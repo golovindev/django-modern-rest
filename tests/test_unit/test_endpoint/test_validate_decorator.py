@@ -1,6 +1,6 @@
 import json
 from http import HTTPMethod, HTTPStatus
-from typing import Generic, Literal, TypeVar, final
+from typing import ClassVar, Generic, Literal, TypeVar, final
 
 import pytest
 from django.http import HttpResponse
@@ -8,15 +8,21 @@ from inline_snapshot import snapshot
 from typing_extensions import TypedDict
 
 from django_modern_rest import (
+    Blueprint,
+    Body,
     Controller,
-    Endpoint,
-    HeaderDescription,
+    HeaderSpec,
     NewHeader,
-    ResponseDescription,
+    ResponseSpec,
     validate,
 )
+from django_modern_rest.endpoint import Endpoint
 from django_modern_rest.exceptions import EndpointMetadataError
-from django_modern_rest.plugins.pydantic import PydanticSerializer
+from django_modern_rest.plugins.pydantic import (
+    PydanticErrorModel,
+    PydanticSerializer,
+)
+from django_modern_rest.routing import compose_blueprints
 from django_modern_rest.test import DMRRequestFactory
 
 _InnerT = TypeVar('_InnerT')
@@ -28,11 +34,11 @@ class _CustomResponse(HttpResponse, Generic[_InnerT]):
 
 
 class _CustomResponseController(Controller[PydanticSerializer]):
-    @validate(ResponseDescription(return_type=str, status_code=HTTPStatus.OK))
+    @validate(ResponseSpec(return_type=str, status_code=HTTPStatus.OK))
     def get(self) -> _CustomResponse[str]:
         return _CustomResponse[str](b'"abc"')
 
-    @validate(ResponseDescription(return_type=str, status_code=HTTPStatus.OK))
+    @validate(ResponseSpec(return_type=str, status_code=HTTPStatus.OK))
     def post(self) -> _CustomResponse[_InnerT]:  # pyright: ignore[reportInvalidTypeVarUse]
         return _CustomResponse[_InnerT](b'"abc"')
 
@@ -61,17 +67,17 @@ def test_validate_generic_response_subtype(
 
 class _WrongHeadersController(Controller[PydanticSerializer]):
     @validate(
-        ResponseDescription(return_type=list[str], status_code=HTTPStatus.OK),
+        ResponseSpec(return_type=list[str], status_code=HTTPStatus.OK),
     )
     def get(self) -> HttpResponse:
         """Has extra response headers."""
         return HttpResponse(b'[]', headers={'X-Custom': 'abc'})
 
     @validate(
-        ResponseDescription(
+        ResponseSpec(
             return_type=list[str],
             status_code=HTTPStatus.OK,
-            headers={'X-Custom': HeaderDescription()},
+            headers={'X-Custom': HeaderSpec()},
         ),
     )
     def post(self) -> HttpResponse:
@@ -103,10 +109,10 @@ def test_validate_wrong_headers(
 
 class _CorrectHeadersController(Controller[PydanticSerializer]):
     @validate(
-        ResponseDescription(
+        ResponseSpec(
             return_type=list[str],
             status_code=HTTPStatus.OK,
-            headers={'X-Custom': HeaderDescription()},
+            headers={'X-Custom': HeaderSpec()},
         ),
     )
     def get(self) -> HttpResponse:
@@ -114,10 +120,10 @@ class _CorrectHeadersController(Controller[PydanticSerializer]):
         return HttpResponse(b'[]', headers={'X-Custom': 'abc'})
 
     @validate(
-        ResponseDescription(
+        ResponseSpec(
             return_type=list[str],
             status_code=HTTPStatus.OK,
-            headers={'X-Custom': HeaderDescription(required=False)},
+            headers={'X-Custom': HeaderSpec(required=False)},
         ),
     )
     def post(self) -> HttpResponse:
@@ -149,7 +155,7 @@ def test_validate_correct_headers(
 
 class _MismatchingMetadata(Controller[PydanticSerializer]):
     @validate(
-        ResponseDescription(int, status_code=HTTPStatus.OK),
+        ResponseSpec(int, status_code=HTTPStatus.OK),
     )
     def get(self) -> HttpResponse:
         return 1  # type: ignore[return-value]
@@ -175,13 +181,53 @@ def test_validate_required_for_responses() -> None:
                 raise NotImplementedError
 
 
+class _NoExplicitDecorator(Controller[PydanticSerializer]):
+    responses: ClassVar[list[ResponseSpec]] = [
+        ResponseSpec(list[int], status_code=HTTPStatus.OK),
+    ]
+
+    def get(self) -> HttpResponse:  # valid
+        return self.to_response([1, 2])
+
+    def put(self) -> HttpResponse:  # invalid
+        return self.to_response(['a'])
+
+
+def test_no_validate_for_responses(dmr_rf: DMRRequestFactory) -> None:
+    """Ensures `@validate` can be skipped, when there are existing responses."""
+    request = dmr_rf.get('/whatever/')
+
+    response = _NoExplicitDecorator.as_view()(request)
+
+    assert isinstance(response, HttpResponse)
+    assert response.status_code == HTTPStatus.OK
+    assert json.loads(response.content) == [1, 2]
+
+    request = dmr_rf.put('/whatever/')
+
+    response = _NoExplicitDecorator.as_view()(request)
+
+    assert isinstance(response, HttpResponse)
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+    assert json.loads(response.content) == snapshot({
+        'detail': [
+            {
+                'type': 'int_type',
+                'loc': [0],
+                'msg': 'Input should be a valid integer',
+                'input': 'a',
+            },
+        ],
+    })
+
+
 def test_validate_on_non_response() -> None:
     """Ensures `@validate` can't be used on regular return types."""
     with pytest.raises(EndpointMetadataError, match='@validate'):
 
         class _WrongValidate(Controller[PydanticSerializer]):
             @validate(  # type: ignore[type-var]
-                ResponseDescription(
+                ResponseSpec(
                     return_type=str,
                     status_code=HTTPStatus.OK,
                 ),
@@ -192,12 +238,12 @@ def test_validate_on_non_response() -> None:
 
 def test_validate_duplicate_statuses() -> None:
     """Ensures `@validate` can't have duplicate status codes."""
-    with pytest.raises(EndpointMetadataError, match='2 times'):
+    with pytest.raises(EndpointMetadataError, match='different metadata'):
 
         class _DuplicateStatuses(Controller[PydanticSerializer]):
             @validate(
-                ResponseDescription(int, status_code=HTTPStatus.OK),
-                ResponseDescription(str, status_code=HTTPStatus.OK),
+                ResponseSpec(int, status_code=HTTPStatus.OK),
+                ResponseSpec(str, status_code=HTTPStatus.OK),
             )
             async def get(self) -> HttpResponse:
                 raise NotImplementedError
@@ -209,7 +255,7 @@ def test_validate_raises_on_new_header() -> None:
 
         class _WrongValidate(Controller[PydanticSerializer]):
             @validate(
-                ResponseDescription(
+                ResponseSpec(
                     return_type=str,
                     status_code=HTTPStatus.OK,
                     headers={'X-Test': NewHeader(value='Value')},  # type: ignore[dict-item]
@@ -221,7 +267,7 @@ def test_validate_raises_on_new_header() -> None:
 
 class _EmptyResponseController(Controller[PydanticSerializer]):
     @validate(
-        ResponseDescription(
+        ResponseSpec(
             None,
             status_code=HTTPStatus.NO_CONTENT,
         ),
@@ -250,7 +296,7 @@ class _TypedDictResponse(TypedDict):
 
 class _TypedDictResponseController(Controller[PydanticSerializer]):
     @validate(
-        ResponseDescription(
+        ResponseSpec(
             _TypedDictResponse,
             status_code=HTTPStatus.OK,
         ),
@@ -259,7 +305,7 @@ class _TypedDictResponseController(Controller[PydanticSerializer]):
         return self.to_response({'user': 'name'})
 
     @validate(
-        ResponseDescription(
+        ResponseSpec(
             _TypedDictResponse,
             status_code=HTTPStatus.CREATED,
         ),
@@ -296,7 +342,7 @@ def test_validate_type_dict_response(dmr_rf: DMRRequestFactory) -> None:
 
 class _LiteralResponseController(Controller[PydanticSerializer]):
     @validate(
-        ResponseDescription(
+        ResponseSpec(
             Literal[1],
             status_code=HTTPStatus.OK,
         ),
@@ -305,7 +351,7 @@ class _LiteralResponseController(Controller[PydanticSerializer]):
         return self.to_response(1)
 
     @validate(
-        ResponseDescription(
+        ResponseSpec(
             Literal[1],
             status_code=HTTPStatus.CREATED,
         ),
@@ -354,7 +400,7 @@ def test_validate_sync_error_handler_for_async() -> None:
                 raise NotImplementedError
 
             @validate(  # type: ignore[arg-type]
-                ResponseDescription(list[int], status_code=HTTPStatus.OK),
+                ResponseSpec(list[int], status_code=HTTPStatus.OK),
                 error_handler=endpoint_error,
             )
             async def post(self) -> HttpResponse:
@@ -374,8 +420,105 @@ def test_validate_async_endpoint_error_for_sync() -> None:
                 raise NotImplementedError
 
             @validate(  # type: ignore[arg-type]
-                ResponseDescription(list[int], status_code=HTTPStatus.OK),
+                ResponseSpec(list[int], status_code=HTTPStatus.OK),
                 error_handler=async_endpoint_error,
+            )
+            def get(self) -> HttpResponse:
+                raise NotImplementedError
+
+
+def test_validate_responses_from_blueprint() -> None:
+    """Ensures `@validate` has right `responses` metadata."""
+
+    class _Blueprint(
+        Blueprint[PydanticSerializer],
+        Body[list[str]],
+    ):
+        responses: ClassVar[list[ResponseSpec]] = [
+            ResponseSpec(
+                dict[str, str],
+                status_code=HTTPStatus.PAYMENT_REQUIRED,
+            ),
+        ]
+
+        @validate(
+            ResponseSpec(list[int], status_code=HTTPStatus.OK),
+        )
+        def post(self) -> HttpResponse:
+            raise NotImplementedError
+
+    controller = compose_blueprints(_Blueprint)
+
+    assert controller.api_endpoints['POST'].metadata.responses == snapshot({
+        HTTPStatus.OK: ResponseSpec(
+            return_type=list[int],
+            status_code=HTTPStatus.OK,
+        ),
+        HTTPStatus.PAYMENT_REQUIRED: ResponseSpec(
+            return_type=dict[str, str],
+            status_code=HTTPStatus.PAYMENT_REQUIRED,
+        ),
+        HTTPStatus.BAD_REQUEST: ResponseSpec(
+            return_type=PydanticErrorModel,
+            status_code=HTTPStatus.BAD_REQUEST,
+        ),
+    })
+
+
+def test_validate_responses_from_components() -> None:
+    """Ensures `@validate` has right `responses_from_components` metadata."""
+
+    class _Blueprint(
+        Blueprint[PydanticSerializer],
+        Body[list[str]],
+    ):
+        responses_from_components = False
+        responses: ClassVar[list[ResponseSpec]] = [
+            ResponseSpec(
+                dict[str, str],
+                status_code=HTTPStatus.PAYMENT_REQUIRED,
+            ),
+        ]
+
+        @validate(
+            ResponseSpec(list[int], status_code=HTTPStatus.OK),
+        )
+        def post(self) -> HttpResponse:
+            raise NotImplementedError
+
+    controller = compose_blueprints(_Blueprint)
+
+    assert controller.api_endpoints['POST'].metadata.responses == snapshot({
+        HTTPStatus.OK: ResponseSpec(
+            return_type=list[int],
+            status_code=HTTPStatus.OK,
+        ),
+        HTTPStatus.PAYMENT_REQUIRED: ResponseSpec(
+            return_type=dict[str, str],
+            status_code=HTTPStatus.PAYMENT_REQUIRED,
+        ),
+    })
+
+
+@pytest.mark.parametrize(
+    'header_name',
+    [
+        'Set-Cookie',
+        'set-cookie',
+        'SET-COOKIE',
+    ],
+)
+def test_validate_with_set_cookie_header(header_name: str) -> None:
+    """@validate with Set-Cookie in ResponseSpec.headers should raise error."""
+    with pytest.raises(EndpointMetadataError, match='Set-Cookie'):
+
+        class _SetCookieHeaderController(Controller[PydanticSerializer]):
+            @validate(
+                ResponseSpec(
+                    return_type=dict,
+                    status_code=HTTPStatus.OK,
+                    headers={header_name: HeaderSpec(required=True)},
+                ),
             )
             def get(self) -> HttpResponse:
                 raise NotImplementedError

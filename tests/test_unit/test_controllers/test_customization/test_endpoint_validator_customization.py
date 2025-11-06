@@ -4,7 +4,7 @@ from typing import Any, ClassVar, final
 
 from typing_extensions import override
 
-from django_modern_rest import APIError, Controller
+from django_modern_rest import APIError, Blueprint, Controller
 from django_modern_rest.endpoint import Endpoint
 from django_modern_rest.metadata import EndpointMetadata
 from django_modern_rest.plugins.pydantic import PydanticSerializer
@@ -13,8 +13,8 @@ from django_modern_rest.test import DMRRequestFactory
 from django_modern_rest.validation import (
     EndpointMetadataValidator,
     ResponseValidator,
-    _ResponseT,
 )
+from django_modern_rest.validation.response import _ResponseT
 
 
 @final
@@ -25,10 +25,11 @@ class _CustomEndpointMetadataValidator(EndpointMetadataValidator):
     def __call__(
         self,
         func: Callable[..., Any],
+        blueprint_cls: type[Blueprint[BaseSerializer]] | None,
         controller_cls: type[Controller[BaseSerializer]],
     ) -> EndpointMetadata:
         self.__class__.was_called = True
-        return super().__call__(func, controller_cls)
+        return super().__call__(func, blueprint_cls, controller_cls)
 
 
 @final

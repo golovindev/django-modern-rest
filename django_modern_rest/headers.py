@@ -1,13 +1,12 @@
 import dataclasses
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias, final
-
-from django_modern_rest.types import Empty, EmptyObj
+from typing import TYPE_CHECKING, Any, final
 
 if TYPE_CHECKING:
+    from django_modern_rest.response import ResponseModification
     from django_modern_rest.serialization import BaseSerializer
 
 
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True, init=False)
 class _BaseResponseHeader:
     """
     Abstract base class that represents an HTTP header in the response.
@@ -29,11 +28,9 @@ class _BaseResponseHeader:
     # TODO: make sure that we can't set fields like `explode`
     # to other values except default
 
-    __slots__ = ('deprecated', 'description', 'example')
-
-    description: str | None
-    deprecated: bool
-    example: Any | None
+    description: str | None = None
+    deprecated: bool = False
+    example: str | None = None
 
 
 @final
@@ -46,20 +43,18 @@ class NewHeader(_BaseResponseHeader):
     Is not used for validation.
     """
 
-    # All new headers are required implicitly,
-    # because they are always added to the response object by us.
-    required: ClassVar[bool] = True
-    # But they can add an exact value from the spec.
     value: str  # noqa: WPS110
 
-    def to_description(self) -> 'HeaderDescription':
+    def to_spec(self) -> 'HeaderSpec':
         """Convert header type."""
-        return HeaderDescription(required=self.required)
+        namespace = dataclasses.asdict(self)
+        namespace.pop('value')
+        return HeaderSpec(**namespace, required=True)
 
 
 @final
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
-class HeaderDescription(_BaseResponseHeader):
+class HeaderSpec(_BaseResponseHeader):
     """
     Existing header that :class:`django.http.HttpResponse` already has.
 
@@ -67,28 +62,19 @@ class HeaderDescription(_BaseResponseHeader):
     Used for validation that all ``required`` headers are present.
     """
 
-    # Does not have a value.
-    value: ClassVar[Empty] = EmptyObj  # noqa: WPS110
-    # But it's "required" state can be customized.
     required: bool = True
 
 
-#: Type of all possible return headers.
-ResponseHeadersT: TypeAlias = (
-    Mapping[str, NewHeader] | Mapping[str, HeaderDescription]
-)
-
-
 def build_headers(
-    headers: Mapping[str, NewHeader] | Empty,
+    modification: 'ResponseModification',
     serializer: type['BaseSerializer'],
-) -> dict[str, Any]:
+) -> dict[str, str]:
     """Returns headers with values for raw data endpoints."""
     result_headers: dict[str, Any] = {'Content-Type': serializer.content_type}
-    if isinstance(headers, Empty):
+    if not modification.headers:
         return result_headers
     result_headers.update({
         header_name: response_header.value
-        for header_name, response_header in headers.items()
+        for header_name, response_header in modification.headers.items()
     })
     return result_headers

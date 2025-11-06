@@ -1,8 +1,9 @@
 Logos
-=======
+=====
 
 The Modern REST logo is available for download and use in the formats below.
-Refer to the `MIT License <https://github.com/wemake-services/django-modern-rest/blob/master/LICENSE>`_
+Refer to the
+`MIT License <https://github.com/wemake-services/django-modern-rest/blob/master/LICENSE>`_
 for information about permission and usage of the logo.
 
 .. tabs::
@@ -57,11 +58,31 @@ for information about permission and usage of the logo.
                     :align: center
                     :target: ../../_static/images/logo-dark.png
 
+Colors
+------
+
+The Modern REST logo uses specific color palettes for different themes:
+
+.. list-table:: Color Palette
+   :header-rows: 1
+
+   * - Theme
+     - Primary Color
+     - Secondary Color
+   * - Light
+     - ``#09271D``
+     - ``#35544A``
+   * - Dark
+     - ``#FFFFFF``
+     - ``#BAC5C4``
+
 Font
 ----
 
-The Modern REST logo uses `Roboto Flex <https://github.com/googlefonts/roboto-flex>`_.
-Font is available under the `SIL Open Font License v1.1 <https://github.com/googlefonts/roboto-flex/blob/main/OFL.txt>`_.
+The Modern REST logo uses
+`Roboto Flex <https://github.com/googlefonts/roboto-flex>`_.
+Font is available under the
+`SIL Open Font License v1.1 <https://github.com/googlefonts/roboto-flex/blob/main/OFL.txt>`_.
 
 Credits
 -------

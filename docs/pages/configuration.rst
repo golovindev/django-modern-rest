@@ -1,18 +1,50 @@
 Configuration
 =============
 
-.. currentmodule:: django_modern_rest.settings
-
 We use ``DMR_SETTINGS`` dictionary object to store all the configuration.
+All keys are typed with :class:`~django_modern_rest.settings.Settings` enum keys
+which can be used to both set and get settings.
 
 .. note::
 
-  Remember, that ``django_modern_rest`` settings are cached after the access.
+  Remember, that ``django-modern-rest`` settings
+  are cached after the first access.
   If you need to modify settings dynamically
-  in runtime use :func:`clear_settings_cache`.
+  in runtime use :func:`~django_modern_rest.settings.clear_settings_cache`.
+  You can modify the size of cache with adjusting
+  :envvar:`DMR_MAX_CACHE_SIZE` value.
 
 Here are all keys and values that can be set.
-To configure ``django-modern-rest`` place this into your ``settings.py``:
+As usual, all settings go to ``settings.py`` file in your Django project.
+
+.. seealso::
+
+  - Official Django settings docs:
+    https://docs.djangoproject.com/en/5.2/topics/settings
+  - ``django-split-settings`` configuration helper
+    https://github.com/wemake-services/django-split-settings
+
+
+.. autoclass:: django_modern_rest.settings.Settings
+  :show-inheritance:
+
+  To get settings use
+  :func:`~django_modern_rest.settings.resolve_setting` function
+  together with ``Settings`` keys:
+
+  .. code:: python
+
+    >>> from django_modern_rest.settings import Settings, resolve_setting
+
+    >>> resolve_setting(Settings.responses)
+    []
+
+  To set settings use:
+
+  .. code:: python
+
+    >>> DMR_SETTINGS = {Settings.responses: []}
+
 
 
 JSON Parsing
@@ -23,7 +55,7 @@ JSON Parsing
   It is recommended to always install ``msgspec``
   with ``'django-modern-rest[msgspec]'`` extra for better performance.
 
-.. data:: 'serialize'
+.. data:: django_modern_rest.settings.Settings.serialize
 
   Default: ``'django_modern_rest.internal.json.serialize'``
 
@@ -35,14 +67,15 @@ JSON Parsing
 
   Custom configuration example, let's say you want to always use ``ujson``:
 
-  .. code:: python
+  .. code-block:: python
+    :caption: settings.py
 
-    >>> DMR_SETTINGS = {'serialize': 'path.to.your.ujson.serialize'}
+    >>> DMR_SETTINGS = {Settings.serialize: 'path.to.your.ujson.serialize'}
 
   See :class:`~django_modern_rest.internal.json.Serialize` for the callback type.
 
 
-.. data:: 'deserialize'
+.. data:: django_modern_rest.settings.Settings.deserialize
 
   Default: ``'django_modern_rest.internal.json.deserialize'``
 
@@ -54,9 +87,10 @@ JSON Parsing
 
   Custom configuration example, let's say you want to always use ``ujson``:
 
-  .. code:: python
+  .. code-block:: python
+    :caption: settings.py
 
-    >>> DMR_SETTINGS = {'deserialize': 'path.to.your.ujson.deserialize'}
+    >>> DMR_SETTINGS = {Settings.deserialize: 'path.to.your.ujson.deserialize'}
 
   See :class:`~django_modern_rest.internal.json.Deserialize`
   for the callback type.
@@ -65,21 +99,22 @@ JSON Parsing
 Response handling
 -----------------
 
-.. data:: 'responses'
+.. data:: django_modern_rest.settings.Settings.responses
 
   Default: ``[]``
 
-  The list of global :class:`~django_modern_rest.response.ResponseDescription`
+  The list of global :class:`~django_modern_rest.response.ResponseSpec`
   object that will be added to all endpoints' metadata
   as a possible response schema.
 
   Use it to set global responses' status codes like ``500``:
 
-  .. code:: python
+  .. code-block:: python
+    :caption: settings.py
 
     >>> from http import HTTPStatus
     >>> from typing_extensions import TypedDict
-    >>> from django_modern_rest.response import ResponseDescription
+    >>> from django_modern_rest.response import ResponseSpec
 
     >>> class Error(TypedDict):
     ...     detail: str
@@ -87,15 +122,15 @@ Response handling
     >>> # If our API can always return a 500 response with `{"detail": str}`
     >>> # error message:
     >>> DMR_SETTINGS = {
-    ...     'responses': [
-    ...         ResponseDescription(
+    ...     Settings.responses: [
+    ...         ResponseSpec(
     ...             Error,
     ...             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
     ...         ),
     ...     ],
     ... }
 
-.. data:: 'validate_responses'
+.. data:: django_modern_rest.settings.Settings.validate_responses
 
   Default: ``True``
 
@@ -117,9 +152,10 @@ Response handling
   But, there's a runtime cost to this. It is recommended to switch
   this validation off for production:
 
-  .. code:: python
+  .. code-block:: python
+    :caption: settings.py
 
-    >>> DMR_SETTINGS = {'validate_responses': False}
+    >>> DMR_SETTINGS = {Settings.validate_responses: False}
 
   .. note::
 
@@ -133,7 +169,7 @@ Response handling
 Error handling
 --------------
 
-.. data:: 'global_error_handler'
+.. data:: django_modern_rest.settings.Settings.global_error_handler
 
   Default: ``'django_modern_rest.errors.global_error_handler'``
 
@@ -151,14 +187,67 @@ Error handling
   See :func:`~django_modern_rest.errors.global_error_handler`
   for the callback type.
 
-  .. code:: python
+  .. code-block:: python
+    :caption: settings.py
 
-    >>> DMR_SETTINGS = {'global_error_handler': 'path.to.your.handler'}
+    >>> DMR_SETTINGS = {Settings.global_error_handler: 'path.to.your.handler'}
 
 
 .. autofunction:: django_modern_rest.errors.global_error_handler
 
+
+HTTP Spec validation
+--------------------
+
+.. data:: django_modern_rest.settings.Settings.no_validate_http_spec
+
+  Default: ``frozenset()``
+
+  A set of unique :class:`~django_modern_rest.settings.HttpSpec` codes
+  to be globally disabled.
+
+  We don't recommend disabling any of these checks globally.
+
+  .. code-block:: python
+    :caption: settings.py
+
+    >>> from django_modern_rest.settings import HttpSpec
+
+    >>> DMR_SETTINGS = {
+    ...     Settings.no_validate_http_spec: {
+    ...         HttpSpec.empty_request_body,
+    ...     },
+    ... }
+
+
+.. autoclass:: django_modern_rest.settings.HttpSpec
+  :show-inheritance:
+  :members:
+
+
+
+Environment variables
+---------------------
+
+.. envvar:: DMR_MAX_CACHE_SIZE
+
+  Default: ``256``
+
+  We use :func:`functools.lru_cache` in many places internally.
+  For example:
+
+  - To create json encoders and decoders only once
+  - To create type validation objects
+    in :class:`~django_modern_rest.serialization.BaseEndpointOptimizer`
+
+  You can control the size / memory usage with this setting.
+
+  Increase if you have a lot of different return types.
+
+
 Misc
 ----
 
-.. autofunction:: clear_settings_cache
+.. autofunction:: django_modern_rest.settings.resolve_setting
+
+.. autofunction:: django_modern_rest.settings.clear_settings_cache

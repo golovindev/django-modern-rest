@@ -4,8 +4,8 @@ from typing import Final
 import pytest
 from django.conf import LazySettings
 from django.urls import URLPattern
+from django.views.decorators.csrf import csrf_exempt
 
-from django_modern_rest import Router
 from django_modern_rest.openapi import OpenAPIConfig, openapi_spec
 from django_modern_rest.openapi.renderers import (
     JsonRenderer,
@@ -13,6 +13,7 @@ from django_modern_rest.openapi.renderers import (
     ScalarRenderer,
     SwaggerRenderer,
 )
+from django_modern_rest.routing import Router
 from django_modern_rest.settings import clear_settings_cache
 
 _TEST_CONFIG: Final = OpenAPIConfig(title='Test API', version='1.0.0')
@@ -69,11 +70,8 @@ def test_pattern_names_match_renderers() -> None:
         config=_TEST_CONFIG,
     )
 
-    pattern_names = [pattern.name for pattern in urlpatterns]
-    assert 'json' in pattern_names
-    assert 'redoc' in pattern_names
-    assert 'scalar' in pattern_names
-    assert 'swagger' in pattern_names
+    renderer_names = {'json', 'redoc', 'scalar', 'swagger'}
+    assert {pattern.name for pattern in urlpatterns} == renderer_names
 
 
 @pytest.mark.parametrize(
@@ -122,25 +120,9 @@ def test_default_config_raises_when_wrong_type(
 ) -> None:
     """Ensure that `TypeError` is raised when config is not `OpenAPIConfig`."""
     settings.DMR_SETTINGS = {
-        'json_serialize': 'django_modern_rest.internal.json.serialize',
+        'openapi_config': 'not-an-object',
     }
 
-    with pytest.raises(
-        TypeError,
-        match='OpenAPI config is not set',
-    ):
-        openapi_spec(
-            router=Router([]),
-            renderers=[JsonRenderer()],
-        )
-
-
-@pytest.mark.usefixtures('_clear_cache')
-def test_default_config_raises_when_missing(settings: LazySettings) -> None:
-    """Ensure that `TypeError` is raised when config key is missing."""
-    settings.DMR_SETTINGS = {
-        'json_serialize': 'django_modern_rest.internal.json.serialize',
-    }
     with pytest.raises(
         TypeError,
         match='OpenAPI config is not set',
@@ -162,3 +144,15 @@ def test_empty_renderers_list() -> None:
             renderers=[],
             config=_TEST_CONFIG,
         )
+
+
+# pyright: reportFunctionMemberAccess=false
+def test_decorated_view_with_csrf_exempt() -> None:
+    """Ensure that csrf_exempt decorator is applied to view."""
+    urlpatterns, _, _ = openapi_spec(
+        router=Router([]),
+        renderers=[JsonRenderer(decorators=[csrf_exempt])],
+        config=_TEST_CONFIG,
+    )
+
+    assert urlpatterns[0].callback.csrf_exempt is True  # type: ignore[attr-defined]

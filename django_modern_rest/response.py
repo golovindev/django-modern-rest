@@ -5,15 +5,12 @@ from typing import Any, Generic, TypeVar, overload
 
 from django.http import HttpResponse
 
+from django_modern_rest.cookies import CookieSpec, NewCookie
 from django_modern_rest.headers import (
-    HeaderDescription,
+    HeaderSpec,
     NewHeader,
 )
 from django_modern_rest.serialization import BaseSerializer
-from django_modern_rest.types import (
-    Empty,
-    EmptyObj,
-)
 
 _ItemT = TypeVar('_ItemT')
 
@@ -32,7 +29,7 @@ class APIError(Exception, Generic[_ItemT]):
         >>> from django_modern_rest import (
         ...     APIError,
         ...     Controller,
-        ...     ResponseDescription,
+        ...     ResponseSpec,
         ...     modify,
         ... )
         >>> from django_modern_rest.plugins.pydantic import PydanticSerializer
@@ -40,7 +37,7 @@ class APIError(Exception, Generic[_ItemT]):
         >>> class UserController(Controller[PydanticSerializer]):
         ...     @modify(
         ...         extra_responses=[
-        ...             ResponseDescription(
+        ...             ResponseSpec(
         ...                 str,
         ...                 status_code=HTTPStatus.NOT_FOUND,
         ...             ),
@@ -61,7 +58,7 @@ class APIError(Exception, Generic[_ItemT]):
         raw_data: _ItemT,
         *,
         status_code: HTTPStatus,
-        headers: dict[str, str] | Empty = EmptyObj,
+        headers: dict[str, str] | None = None,
     ) -> None:
         """Create response from parts."""
         super().__init__()
@@ -71,9 +68,9 @@ class APIError(Exception, Generic[_ItemT]):
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class ResponseDescription:
+class ResponseSpec:
     """
-    Represents a single API response.
+    Represents a single API response specification.
 
     Args:
         return_type: Shows *return_type* in the documentation
@@ -85,8 +82,10 @@ class ResponseDescription:
             one when ``HttpResponse`` is returned.
         headers: Shows *headers* in the documentation.
             When passed, we validate that all given required headers are present
-            in the final response. Headers with ``value`` attribute set
-            will be added to the final response.
+            in the final response.
+        cookies: Shows *cookies* in the documentation.
+            When passed, we validate that all given required cookies are present
+            in the final response.
 
     We use this structure to validate responses and render them in OpenAPI.
     """
@@ -94,9 +93,13 @@ class ResponseDescription:
     # `type[T]` limits some type annotations, like `Literal[1]`:
     return_type: Any
     status_code: HTTPStatus = dataclasses.field(kw_only=True)
-    headers: dict[str, HeaderDescription] | Empty = dataclasses.field(
+    headers: Mapping[str, HeaderSpec] | None = dataclasses.field(
         kw_only=True,
-        default=EmptyObj,
+        default=None,
+    )
+    cookies: Mapping[str, CookieSpec] | None = dataclasses.field(
+        kw_only=True,
+        default=None,
     )
 
     # TODO: description, examples, etc
@@ -116,29 +119,38 @@ class ResponseModification:
             We validate *status_code* to match the specified
             one when ``HttpResponse`` is returned.
         headers: Shows *headers* in the documentation.
-            When passed, we validate that all given required headers are present
-            in the final response. Headers with ``value`` attribute set
-            will be added to the final response.
+            Headers passed here will be added to the final response.
+        cookies: Shows *cookies* in the documentation.
+            Cookies passed here will be added to the final response.
 
-    We use this structure to validate responses and render them in OpenAPI.
+    We use this structure to modify the default response.
     """
 
     # `type[T]` limits some type annotations, like `Literal[1]`:
     return_type: Any
     status_code: HTTPStatus
-    headers: Mapping[str, NewHeader] | Empty
+    headers: Mapping[str, NewHeader] | None
+    cookies: Mapping[str, NewCookie] | None
 
-    def to_description(self) -> ResponseDescription:
+    def to_spec(self) -> ResponseSpec:
         """Convert response modification to response description."""
-        return ResponseDescription(
+        return ResponseSpec(
             return_type=self.return_type,
             status_code=self.status_code,
             headers=(
-                EmptyObj
-                if isinstance(self.headers, Empty)
+                None
+                if self.headers is None
                 else {
-                    header_name: header.to_description()
+                    header_name: header.to_spec()
                     for header_name, header in self.headers.items()
+                }
+            ),
+            cookies=(
+                None
+                if self.cookies is None
+                else {
+                    cookie_key: cookie.to_spec()
+                    for cookie_key, cookie in self.cookies.items()
                 }
             ),
         )
@@ -146,33 +158,36 @@ class ResponseModification:
 
 @overload
 def build_response(
-    method: HTTPMethod | str,
     serializer: type[BaseSerializer],
     *,
     raw_data: Any,
-    headers: dict[str, str] | Empty = EmptyObj,
-    status_code: HTTPStatus | Empty = EmptyObj,
+    method: HTTPMethod | str,
+    headers: dict[str, str] | None = None,
+    cookies: Mapping[str, NewCookie] | None = None,
+    status_code: HTTPStatus | None = None,
 ) -> HttpResponse: ...
 
 
 @overload
 def build_response(
-    method: None,
     serializer: type[BaseSerializer],
     *,
     raw_data: Any,
     status_code: HTTPStatus,
-    headers: dict[str, str] | Empty = EmptyObj,
+    method: None = None,
+    headers: dict[str, str] | None = None,
+    cookies: Mapping[str, NewCookie] | None = None,
 ) -> HttpResponse: ...
 
 
-def build_response(
-    method: HTTPMethod | str | None,
+def build_response(  # noqa: WPS211
     serializer: type[BaseSerializer],
     *,
     raw_data: Any,
-    headers: dict[str, str] | Empty = EmptyObj,
-    status_code: HTTPStatus | Empty = EmptyObj,
+    method: HTTPMethod | str | None = None,
+    headers: dict[str, str] | None = None,
+    cookies: Mapping[str, NewCookie] | None = None,
+    status_code: HTTPStatus | None = None,
 ) -> HttpResponse:
     """
     Utility that returns the actual `HttpResponse` object from its parts.
@@ -181,11 +196,11 @@ def build_response(
     We need this as a function, so it can be called when no endpoints exist.
 
     Do not use directly, prefer using
-    :meth:`django_modern_rest.endpoint.Endpoint.to_response` method.
+    :meth:`~django_modern_rest.controller.Controller.to_response` method.
 
     You have to provide either *method* or *status_code*.
     """
-    if not isinstance(status_code, Empty):
+    if status_code is not None:
         status = status_code
     elif method is not None:
         status = infer_status_code(method)
@@ -194,15 +209,19 @@ def build_response(
             'Cannot pass both `method=None` and `status_code=Empty`',
         )
 
-    response_headers = {} if isinstance(headers, Empty) else headers
+    response_headers = {} if headers is None else headers
     if 'Content-Type' not in response_headers:
         response_headers['Content-Type'] = serializer.content_type
 
-    return HttpResponse(
+    response = HttpResponse(
         content=serializer.serialize(raw_data),
         status=status,
         headers=response_headers,
     )
+    if cookies:
+        for cookie_key, new_cookie in cookies.items():
+            response.set_cookie(cookie_key, **new_cookie.as_dict())
+    return response
 
 
 def infer_status_code(method_name: HTTPMethod | str) -> HTTPStatus:
