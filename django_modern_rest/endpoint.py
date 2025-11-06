@@ -1,5 +1,5 @@
 import inspect
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Set
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
@@ -12,11 +12,10 @@ from typing import (
 from django.http import HttpResponse
 from typing_extensions import ParamSpec, Protocol, TypeVar, deprecated
 
+from django_modern_rest.cookies import NewCookie
 from django_modern_rest.errors import AsyncErrorHandlerT, SyncErrorHandlerT
 from django_modern_rest.exceptions import ResponseSerializationError
-from django_modern_rest.headers import (
-    NewHeader,
-)
+from django_modern_rest.headers import NewHeader
 from django_modern_rest.openapi.objects import (
     Callback,
     ExternalDocumentation,
@@ -24,10 +23,11 @@ from django_modern_rest.openapi.objects import (
     SecurityRequirement,
     Server,
 )
-from django_modern_rest.response import APIError, ResponseDescription
+from django_modern_rest.response import APIError, ResponseSpec, build_response
 from django_modern_rest.serialization import BaseSerializer
 from django_modern_rest.settings import (
-    DMR_GLOBAL_ERROR_HANDLER_KEY,
+    HttpSpec,
+    Settings,
     resolve_setting,
 )
 from django_modern_rest.validation import (
@@ -73,16 +73,19 @@ class Endpoint:  # noqa: WPS214
         self,
         func: Callable[..., Any],
         *,
-        blueprint_cls: type['Blueprint[BaseSerializer]'],
+        blueprint_cls: type['Blueprint[BaseSerializer]'] | None,
+        controller_cls: type['Controller[BaseSerializer]'],
     ) -> None:
         """
         Create an entrypoint.
 
         Args:
             func: Entrypoint handler. An actual function to be called.
-            blueprint_cls: ``Blueprint`` class that this endpoint belongs to.
+            controller_cls: ``Controller`` class that this endpoint belongs to.
+            blueprint_cls: ``Blueprint`` class that this endpoint
+                might belong to.
 
-        .. error::
+        .. danger::
 
             Endpoint object must not have any mutable instance state,
             because its instance is reused for all requests.
@@ -94,6 +97,7 @@ class Endpoint:  # noqa: WPS214
         metadata = self.metadata_validator_cls(payload=payload)(
             func,
             blueprint_cls=blueprint_cls,
+            controller_cls=controller_cls,
         )
         func.__metadata__ = metadata  # type: ignore[attr-defined]
         self.metadata = metadata
@@ -101,29 +105,27 @@ class Endpoint:  # noqa: WPS214
         # We need a func before any wrappers, but with metadata:
         self.response_validator = self.response_validator_cls(
             metadata,
-            blueprint_cls.serializer,
+            controller_cls.serializer,
         )
         # We can now run endpoint's optimization:
-        blueprint_cls.serializer.optimizer.optimize_endpoint(metadata)
+        controller_cls.serializer.optimizer.optimize_endpoint(metadata)
 
         # Now we can add wrappers:
         if inspect.iscoroutinefunction(func):
-            self._func = self._async_endpoint(func)
             self.is_async = True
+            self._func = self._async_endpoint(func)
         else:
-            self._func = self._sync_endpoint(func)
             self.is_async = False
+            self._func = self._sync_endpoint(func)
 
     def __call__(
         self,
-        blueprint: 'Blueprint[BaseSerializer] | None',
         controller: 'Controller[BaseSerializer]',
         *args: Any,
         **kwargs: Any,
     ) -> HttpResponse:
         """Run the endpoint and return the response."""
         return self._func(  # type: ignore[no-any-return]
-            blueprint,
             controller,
             *args,
             **kwargs,
@@ -131,7 +133,6 @@ class Endpoint:  # noqa: WPS214
 
     def handle_error(
         self,
-        blueprint: 'Blueprint[BaseSerializer] | None',
         controller: 'Controller[BaseSerializer]',
         exc: Exception,
     ) -> HttpResponse:
@@ -140,7 +141,7 @@ class Endpoint:  # noqa: WPS214
 
         Override this method to add custom error handling.
         """
-        active_blueprint = blueprint or controller
+        active_blueprint = controller.active_blueprint
         if self.metadata.error_handler is not None:
             try:
                 # We validate this, no error possible in runtime:
@@ -152,9 +153,9 @@ class Endpoint:  # noqa: WPS214
             except Exception:  # noqa: S110
                 # We don't use `suppress` instead of `expect / pass` for speed.
                 pass  # noqa: WPS420
-        if blueprint:
+        if controller.blueprint:
             try:
-                return blueprint.handle_error(self, exc)
+                return controller.blueprint.handle_error(self, exc)
             except Exception:  # noqa: S110
                 pass  # noqa: WPS420
         # Per-endpoint error handler and per-blueprint handlers didn't work.
@@ -167,7 +168,6 @@ class Endpoint:  # noqa: WPS214
 
     async def handle_async_error(
         self,
-        blueprint: 'Blueprint[BaseSerializer] | None',
         controller: 'Controller[BaseSerializer]',
         exc: Exception,
     ) -> HttpResponse:
@@ -176,7 +176,7 @@ class Endpoint:  # noqa: WPS214
 
         Override this method to add custom async error handling.
         """
-        active_blueprint = blueprint or controller
+        active_blueprint = controller.active_blueprint
         if self.metadata.error_handler is not None:
             try:
                 # We validate this, no error possible in runtime:
@@ -188,9 +188,9 @@ class Endpoint:  # noqa: WPS214
             except Exception:  # noqa: S110
                 # We don't use `suppress` here for speed.
                 pass  # noqa: WPS420
-        if blueprint:
+        if controller.blueprint:
             try:
-                return await blueprint.handle_async_error(self, exc)
+                return await controller.blueprint.handle_async_error(self, exc)
             except Exception:  # noqa: S110
                 pass  # noqa: WPS420
         # Per-endpoint error handler and per-blueprint handlers didn't work.
@@ -206,15 +206,14 @@ class Endpoint:  # noqa: WPS214
         func: Callable[..., Any],
     ) -> Callable[..., Awaitable[HttpResponse]]:
         async def decorator(
-            blueprint: 'Blueprint[BaseSerializer] | None',
             controller: 'Controller[BaseSerializer]',
             *args: Any,
             **kwargs: Any,
         ) -> HttpResponse:
-            active_blueprint = blueprint or controller
+            active_blueprint = controller.active_blueprint
             # Parse request:
             try:
-                active_blueprint.serializer_context.parse_and_bind(
+                active_blueprint._serializer_context.parse_and_bind(  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
                     active_blueprint,
                     active_blueprint.request,
                     *args,
@@ -222,8 +221,8 @@ class Endpoint:  # noqa: WPS214
                 )
             except Exception as exc:
                 return self._make_http_response(
-                    active_blueprint,
-                    await self.handle_async_error(blueprint, controller, exc),
+                    controller,
+                    await self.handle_async_error(controller, exc),
                 )
             # Return response:
             try:
@@ -235,12 +234,8 @@ class Endpoint:  # noqa: WPS214
                     headers=exc.headers,
                 )
             except Exception as exc:
-                func_result = await self.handle_async_error(
-                    blueprint,
-                    controller,
-                    exc,
-                )
-            return self._make_http_response(active_blueprint, func_result)
+                func_result = await self.handle_async_error(controller, exc)
+            return self._make_http_response(controller, func_result)
 
         return decorator
 
@@ -249,15 +244,14 @@ class Endpoint:  # noqa: WPS214
         func: Callable[..., Any],
     ) -> Callable[..., HttpResponse]:
         def decorator(
-            blueprint: 'Blueprint[BaseSerializer] | None',
             controller: 'Controller[BaseSerializer]',
             *args: Any,
             **kwargs: Any,
         ) -> HttpResponse:
-            active_blueprint = blueprint or controller
+            active_blueprint = controller.active_blueprint
             # Parse request:
             try:
-                active_blueprint.serializer_context.parse_and_bind(
+                active_blueprint._serializer_context.parse_and_bind(  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
                     active_blueprint,
                     active_blueprint.request,
                     *args,
@@ -265,12 +259,8 @@ class Endpoint:  # noqa: WPS214
                 )
             except Exception as exc:
                 return self._make_http_response(
-                    active_blueprint,
-                    self.handle_error(
-                        blueprint,
-                        controller,
-                        exc,
-                    ),
+                    controller,
+                    self.handle_error(controller, exc),
                 )
             # Return response:
             try:
@@ -282,18 +272,14 @@ class Endpoint:  # noqa: WPS214
                     headers=exc.headers,
                 )
             except Exception as exc:
-                func_result = self.handle_error(
-                    blueprint,
-                    controller,
-                    exc,
-                )
-            return self._make_http_response(active_blueprint, func_result)
+                func_result = self.handle_error(controller, exc)
+            return self._make_http_response(controller, func_result)
 
         return decorator
 
     def _make_http_response(
         self,
-        blueprint: 'Blueprint[BaseSerializer]',
+        controller: 'Controller[BaseSerializer]',
         raw_data: Any | HttpResponse,
     ) -> HttpResponse:
         """
@@ -303,37 +289,39 @@ class Endpoint:  # noqa: WPS214
         just validates it before returning.
         """
         try:
-            return self._validate_response(blueprint, raw_data)
+            return self._validate_response(controller, raw_data)
         except ResponseSerializationError as exc:
             # We can't call `self.handle_error` or `self.handle_async_error`
             # here, because it is too late. Since `ResponseSerializationError`
             # happened mostly because the return
             # schema validation was not successful.
             payload = {'detail': exc.args[0]}
-            return blueprint.to_error(
+            return controller.to_error(
                 payload,
                 status_code=exc.status_code,
             )
 
     def _validate_response(
         self,
-        blueprint: 'Blueprint[BaseSerializer]',
+        controller: 'Controller[BaseSerializer]',
         raw_data: Any | HttpResponse,
     ) -> HttpResponse:
         if isinstance(raw_data, HttpResponse):
             return self.response_validator.validate_response(
-                blueprint,
+                controller,
                 raw_data,
             )
 
         validated = self.response_validator.validate_modification(
-            blueprint,
+            controller,
             raw_data,
         )
-        return HttpResponse(
-            content=blueprint.serializer.serialize(validated.raw_data),
-            status=validated.status_code,
+        return build_response(
+            controller.serializer,
+            raw_data=validated.raw_data,
+            status_code=validated.status_code,
             headers=validated.headers,
+            cookies=validated.cookies,
         )
 
     def _handle_default_error(
@@ -347,7 +335,7 @@ class Endpoint:  # noqa: WPS214
         If not class level error handling has happened.
         """
         return resolve_setting(  # type: ignore[no-any-return]
-            DMR_GLOBAL_ERROR_HANDLER_KEY,
+            Settings.global_error_handler,
             import_string=True,
         )(blueprint, self, exc)
 
@@ -359,11 +347,12 @@ _ResponseT = TypeVar('_ResponseT', bound=HttpResponse | Awaitable[HttpResponse])
 
 @overload
 def validate(  # noqa: WPS234
-    response: ResponseDescription,
+    response: ResponseSpec,
     /,
-    *responses: ResponseDescription,
+    *responses: ResponseSpec,
     error_handler: AsyncErrorHandlerT,
     validate_responses: bool | None = None,
+    no_validate_http_spec: Set[HttpSpec] | None = None,
     allow_custom_http_methods: bool = False,
 ) -> Callable[
     [Callable[_ParamT, Awaitable[HttpResponse]]],
@@ -373,11 +362,12 @@ def validate(  # noqa: WPS234
 
 @overload
 def validate(
-    response: ResponseDescription,
+    response: ResponseSpec,
     /,
-    *responses: ResponseDescription,
+    *responses: ResponseSpec,
     error_handler: SyncErrorHandlerT,
     validate_responses: bool | None = None,
+    no_validate_http_spec: Set[HttpSpec] | None = None,
     allow_custom_http_methods: bool = False,
 ) -> Callable[
     [Callable[_ParamT, HttpResponse]],
@@ -387,10 +377,11 @@ def validate(
 
 @overload
 def validate(
-    response: ResponseDescription,
+    response: ResponseSpec,
     /,
-    *responses: ResponseDescription,
+    *responses: ResponseSpec,
     validate_responses: bool | None = None,
+    no_validate_http_spec: Set[HttpSpec] | None = None,
     error_handler: None = None,
     allow_custom_http_methods: bool = False,
 ) -> Callable[
@@ -400,10 +391,11 @@ def validate(
 
 
 def validate(  # noqa: WPS211  # pyright: ignore[reportInconsistentOverload]
-    response: ResponseDescription,
+    response: ResponseSpec,
     /,
-    *responses: ResponseDescription,
+    *responses: ResponseSpec,
     validate_responses: bool | None = None,
+    no_validate_http_spec: Set[HttpSpec] | None = None,
     error_handler: SyncErrorHandlerT | AsyncErrorHandlerT | None = None,
     allow_custom_http_methods: bool = False,
     summary: str | None = None,
@@ -437,13 +429,13 @@ def validate(  # noqa: WPS211  # pyright: ignore[reportInconsistentOverload]
         >>> from django_modern_rest import (
         ...     Controller,
         ...     validate,
-        ...     ResponseDescription,
+        ...     ResponseSpec,
         ... )
         >>> from django_modern_rest.plugins.pydantic import PydanticSerializer
 
         >>> class TaskController(Controller[PydanticSerializer]):
         ...     @validate(
-        ...         ResponseDescription(
+        ...         ResponseSpec(
         ...             return_type=list[int],
         ...             status_code=HTTPStatus.OK,
         ...         ),
@@ -468,6 +460,8 @@ def validate(  # noqa: WPS211  # pyright: ignore[reportInconsistentOverload]
             of responses for this endpoint? Customizable via global setting,
             per controller, and per endpoint.
             Here we only store the per endpoint information.
+        no_validate_http_spec: Set of http spec validation checks
+            that we disable for this endpoint.
         error_handler: Callback function to be called
             when this endpoint faces an exception.
         allow_custom_http_methods: Should we allow custom HTTP
@@ -503,6 +497,7 @@ def validate(  # noqa: WPS211  # pyright: ignore[reportInconsistentOverload]
         payload=ValidateEndpointPayload(
             responses=[response, *responses],
             validate_responses=validate_responses,
+            no_validate_http_spec=no_validate_http_spec,
             error_handler=error_handler,
             allow_custom_http_methods=allow_custom_http_methods,
             summary=summary,
@@ -593,8 +588,10 @@ def modify(
     error_handler: AsyncErrorHandlerT,
     status_code: HTTPStatus | None = None,
     headers: Mapping[str, NewHeader] | None = None,
+    cookies: Mapping[str, NewCookie] | None = None,
     validate_responses: bool | None = None,
-    extra_responses: list[ResponseDescription] | None = None,
+    extra_responses: list[ResponseSpec] | None = None,
+    no_validate_http_spec: Set[HttpSpec] | None = None,
     allow_custom_http_methods: bool = False,
     summary: str | None = None,
     description: str | None = None,
@@ -614,8 +611,10 @@ def modify(
     error_handler: SyncErrorHandlerT,
     status_code: HTTPStatus | None = None,
     headers: Mapping[str, NewHeader] | None = None,
+    cookies: Mapping[str, NewCookie] | None = None,
     validate_responses: bool | None = None,
-    extra_responses: list[ResponseDescription] | None = None,
+    extra_responses: list[ResponseSpec] | None = None,
+    no_validate_http_spec: Set[HttpSpec] | None = None,
     allow_custom_http_methods: bool = False,
     summary: str | None = None,
     description: str | None = None,
@@ -634,8 +633,10 @@ def modify(
     *,
     status_code: HTTPStatus | None = None,
     headers: Mapping[str, NewHeader] | None = None,
+    cookies: Mapping[str, NewCookie] | None = None,
     validate_responses: bool | None = None,
-    extra_responses: list[ResponseDescription] | None = None,
+    extra_responses: list[ResponseSpec] | None = None,
+    no_validate_http_spec: Set[HttpSpec] | None = None,
     error_handler: None = None,
     allow_custom_http_methods: bool = False,
     summary: str | None = None,
@@ -654,8 +655,10 @@ def modify(  # noqa: WPS211
     *,
     status_code: HTTPStatus | None = None,
     headers: Mapping[str, NewHeader] | None = None,
+    cookies: Mapping[str, NewCookie] | None = None,
     validate_responses: bool | None = None,
-    extra_responses: list[ResponseDescription] | None = None,
+    extra_responses: list[ResponseSpec] | None = None,
+    no_validate_http_spec: Set[HttpSpec] | None = None,
     error_handler: SyncErrorHandlerT | AsyncErrorHandlerT | None = None,
     allow_custom_http_methods: bool = False,
     summary: str | None = None,
@@ -691,13 +694,15 @@ def modify(  # noqa: WPS211
             based on the HTTP method name for default returned response.
         headers: Shows *headers* in the documentation.
             When *headers* are passed we will add them for the default response.
-            Use non-empty ``value`` parameter
-            of :data:`django_modern_rest.headers.ResponseHeadersT` object.
+        cookies: Shows *cookies* in the documentation.
+            When *cookies* are passed we will add them for the default response.
         extra_responses: List of extra responses that this endpoint can return.
         validate_responses: Do we have to run runtime validation
             of responses for this endpoint? Customizable via global setting,
             per controller, and per endpoint.
             Here we only store the per endpoint information.
+        no_validate_http_spec: Set of http spec validation checks
+            that we disable for this endpoint.
         error_handler: Callback function to be called
             when this endpoint faces an exception.
         allow_custom_http_methods: Should we allow custom HTTP
@@ -725,7 +730,6 @@ def modify(  # noqa: WPS211
             If a servers array is specified at the Path Item Object or
             OpenAPI Object level, it will be overridden by this value.
 
-
     Returns:
         The same function with ``__payload__`` payload instance.
 
@@ -738,8 +742,10 @@ def modify(  # noqa: WPS211
         payload=ModifyEndpointPayload(
             status_code=status_code,
             headers=headers,
+            cookies=cookies,
             responses=extra_responses,
             validate_responses=validate_responses,
+            no_validate_http_spec=no_validate_http_spec,
             error_handler=error_handler,
             allow_custom_http_methods=allow_custom_http_methods,
             summary=summary,

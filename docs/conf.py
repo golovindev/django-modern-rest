@@ -64,12 +64,15 @@ extensions = [
     # https://github.com/executablebooks/MyST-Parser
     'myst_parser',
     # 3rd party, order matters:
+    'auto_pytabs.sphinx_ext',
     'sphinx_design',
     'sphinx_copybutton',
     'sphinx_contributors',
     'sphinx_tabs.tabs',
     'sphinx_iconify',
     'sphinxcontrib.mermaid',
+    # custom extensions
+    'docs.tools.sphinx_ext',
 ]
 
 
@@ -107,6 +110,9 @@ nitpick_ignore = [
     (PY_CLASS, 'django_modern_rest.internal.middleware_wrapper._TypeT'),
     (PY_CLASS, '_SerializerT'),
     (PY_CLASS, '_BlueprintT'),
+    (PY_CLASS, 'django_modern_rest.decorators._ReturnT'),
+    (PY_CLASS, 'django_modern_rest.decorators._ViewT'),
+    (PY_CLASS, 'django_modern_rest.decorators._TypeT'),
     ('py:obj', 'django_modern_rest.controller._SerializerT_co'),
     # Undocumented in Django:
     (PY_CLASS, 'django.urls.resolvers.URLPattern'),
@@ -168,6 +174,12 @@ html_theme_options = {
     'github_url': 'https://github.com/wemake-services/django-modern-rest',
     'readthedocs_url': 'https://django-modern-rest.readthedocs.io',
     'globaltoc_expand_depth': 1,
+    'nav_links': [
+        {
+            'title': 'Ask DeepWiki',
+            'url': 'https://deepwiki.com/wemake-services/django-modern-rest',
+        },
+    ],
     'accent_color': 'green',
     'light_logo': '_static/images/logo-light.svg',
     'dark_logo': '_static/images/logo-dark.svg',
@@ -178,12 +190,16 @@ html_context = {
     'source_type': 'github',
     'source_user': 'wemake-services',
     'source_repo': 'django-modern-rest',
+    'source_version': 'master',
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
+html_js_files = [
+    'https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js',
+]
 
 
 def resolve_canonical_names(app: Sphinx, doctree: Node) -> None:

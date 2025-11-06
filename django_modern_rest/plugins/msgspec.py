@@ -23,8 +23,7 @@ from django_modern_rest.serialization import (
     BaseSerializer,
 )
 from django_modern_rest.settings import (
-    DMR_DESERIALIZE_KEY,
-    DMR_SERIALIZE_KEY,
+    Settings,
     resolve_setting,
 )
 
@@ -97,7 +96,7 @@ class MsgspecSerializer(BaseSerializer):
     @classmethod
     def serialize(cls, structure: Any) -> bytes:
         """Convert any object to json bytestring."""
-        serialize = resolve_setting(DMR_SERIALIZE_KEY, import_string=True)
+        serialize = resolve_setting(Settings.serialize, import_string=True)
         return serialize(  # type: ignore[no-any-return]
             structure,
             cls.serialize_hook,
@@ -111,7 +110,7 @@ class MsgspecSerializer(BaseSerializer):
 
         TypeAdapter used for type validation is cached for further uses.
         """
-        deserialize = resolve_setting(DMR_DESERIALIZE_KEY, import_string=True)
+        deserialize = resolve_setting(Settings.deserialize, import_string=True)
         return deserialize(
             buffer,
             cls.deserialize_hook,
@@ -160,8 +159,17 @@ class MsgspecSerializer(BaseSerializer):
         cls,
         error: Exception | str,
     ) -> list[MsgspecErrorDetails]:
-        """Serialize an exception to json the best way possible."""
-        if isinstance(error, msgspec.ValidationError):
+        """
+        Convert serialization or deserialization error to json format.
+
+        Args:
+            error: A serialization exception like a validation error or
+                a ``django_modern_rest.exceptions.DataParsingError``.
+
+        Returns:
+            Simple python object - exception converted to json.
+        """
+        if isinstance(error, (msgspec.ValidationError, str)):
             return [{'type': 'value_error', 'loc': [], 'msg': str(error)}]
         raise NotImplementedError(
             f'Cannot serialize {error!r} of type {type(error)} to json safely',

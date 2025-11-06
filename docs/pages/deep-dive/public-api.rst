@@ -6,12 +6,13 @@ Controller
 
 .. autoclass:: django_modern_rest.controller.Blueprint
   :members:
-  :exclude-members: endpoint_cls, serializer_context_cls, validator_cls
+  :exclude-members: endpoint_cls, serializer_context_cls, blueprint_validator_cls, controller_validator_cls
+  :show-inheritance:
 
 .. autoclass:: django_modern_rest.controller.Controller
   :members:
   :inherited-members:
-  :exclude-members: endpoint_cls, serializer_context_cls, validator_cls
+  :exclude-members: endpoint_cls, serializer_context_cls, blueprint_validator_cls, controller_validator_cls
   :show-inheritance:
 
 
@@ -28,20 +29,10 @@ Endpoint
 .. autodecorator:: django_modern_rest.endpoint.validate
 
 
-Components
-----------
+Response, headers and cookies
+-----------------------------
 
-.. autoclass:: django_modern_rest.components.Headers
-
-.. autoclass:: django_modern_rest.components.Query
-
-.. autoclass:: django_modern_rest.components.Body
-
-
-Response and headers
---------------------
-
-.. autoclass:: django_modern_rest.response.ResponseDescription
+.. autoclass:: django_modern_rest.response.ResponseSpec
   :members:
 
 .. autoclass:: django_modern_rest.response.ResponseModification
@@ -52,24 +43,21 @@ Response and headers
 
 .. autofunction:: django_modern_rest.response.build_response
 
-.. autoclass:: django_modern_rest.headers.HeaderDescription
+.. autoclass:: django_modern_rest.headers.HeaderSpec
   :members:
 
 .. autoclass:: django_modern_rest.headers.NewHeader
   :members:
 
-.. autodata:: django_modern_rest.headers.ResponseHeadersT
+.. autoclass:: django_modern_rest.cookies.CookieSpec
+  :members:
+
+.. autoclass:: django_modern_rest.cookies.NewCookie
+  :members:
 
 
 Validation
 ----------
-
-.. autoclass:: django_modern_rest.validation.BlueprintValidator
-  :members:
-
-.. autoclass:: django_modern_rest.validation.ResponseValidator
-
-.. autoclass:: django_modern_rest.validation.EndpointMetadataValidator
 
 .. autoclass:: django_modern_rest.validation.ModifyEndpointPayload
 
@@ -144,9 +132,23 @@ Utilities
 Decorators
 ----------
 
-.. autoclass:: django_modern_rest.decorators.dispatch_decorator
+.. autofunction:: django_modern_rest.decorators.dispatch_decorator
 
-.. autoclass:: django_modern_rest.decorators.wrap_middleware
+.. autofunction:: django_modern_rest.decorators.endpoint_decorator
+
+.. autofunction:: django_modern_rest.decorators.wrap_middleware
+
+
+Testing
+-------
+
+.. autoclass:: django_modern_rest.test.DMRRequestFactory
+
+.. autoclass:: django_modern_rest.test.DMRAsyncRequestFactory
+
+.. autoclass:: django_modern_rest.test.DMRClient
+
+.. autoclass:: django_modern_rest.test.DMRAsyncClient
 
 
 Plugins

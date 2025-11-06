@@ -5,17 +5,19 @@ from django.conf import settings
 from django.core.handlers import asgi
 from django.urls import include, path
 
-from django_modern_rest import Body, Controller, Headers, Router
+from django_modern_rest import Body, Controller, Headers
 from django_modern_rest.plugins.pydantic import PydanticSerializer
+from django_modern_rest.routing import Router
 
-settings.configure(
-    # Keep it as is
-    ROOT_URLCONF=__name__,
-    # Required options but feel free to configure as you like
-    DMR_SETTINGS={},
-    ALLOWED_HOSTS='*',
-    DEBUG=True,
-)
+if not settings.configured:
+    settings.configure(
+        # Keep it as is
+        ROOT_URLCONF=__name__,
+        # Required options but feel free to configure as you like
+        DMR_SETTINGS={},
+        ALLOWED_HOSTS='*',
+        DEBUG=True,
+    )
 
 app = asgi.ASGIHandler()
 
@@ -48,3 +50,5 @@ router = Router([
 urlpatterns = [
     path('api/', include((router.urls, 'your_app'), namespace='api')),
 ]
+
+# run: {"controller": "UserController", "method": "post", "body": {"email": "djangomodernrest@wms.org"}, "headers": {"X-API-Consumer": "my-api"}, "url": "/api/user/"}  # noqa: ERA001, E501

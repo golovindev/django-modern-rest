@@ -12,6 +12,7 @@
 [![codecov](https://codecov.io/gh/wemake-services/django-modern-rest/branch/master/graph/badge.svg)](https://codecov.io/gh/wemake-services/django-modern-rest)
 [![Python Version](https://img.shields.io/pypi/pyversions/django-modern-rest.svg)](https://pypi.org/project/django-modern-rest/)
 [![wemake-python-styleguide](https://img.shields.io/badge/style-wemake-000000.svg)](https://github.com/wemake-services/wemake-python-styleguide)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/wemake-services/django-modern-rest)
 </div>
 
 ## Features
@@ -22,7 +23,7 @@
 - [x] Supports `pydantic2`, but not bound to it
 - [x] Supports `msgspec`, but not bound to it
 - [x] Strict schema validation for requests and responses
-- [x] Supports async Django
+- [x] Supports async Django without any `sync_to_async` calls inside
 - [ ] Supports `openapi` 3.1+ schema generation out of the box
 - [x] Supports all your existing `django` primitives and packages, no custom runtimes
 - [ ] Great testing tools with [schemathesis](https://github.com/schemathesis/schemathesis), [polyfactory](https://github.com/litestar-org/polyfactory), bundled `pytest` plugin, and default Django's testing primitives
@@ -31,31 +32,16 @@
 - [x] Great docs
 - [x] No emojis 🌚️️
 
+---------
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/wemake-services/django-modern-rest/master/docs/_static/images/benchmarks/sync-light.svg#gh-light-mode-only" alt="Benchmark - Light" width="100%" height="auto" />
-  <img src="https://raw.githubusercontent.com/wemake-services/django-modern-rest/master/docs/_static/images/benchmarks/sync-dark.svg#gh-dark-mode-only" alt="Benchmakr - Dark" width="100%" height="auto" />
+  <img src="https://raw.githubusercontent.com/wemake-services/django-modern-rest/master/docs/_static/images/benchmarks/sync-light.svg#gh-light-mode-only" alt="Benchmark - Light" width="80%" height="auto" />
+  <img src="https://raw.githubusercontent.com/wemake-services/django-modern-rest/master/docs/_static/images/benchmarks/sync-dark.svg#gh-dark-mode-only" alt="Benchmakr - Dark" width="80%" height="auto" />
 </div>
 
 <p align="center">
   <em>Sync mode</em>
 </p>
-
-
-## Installation
-
-Works for:
-- Python 3.11+
-- Django 4.2+
-
-```bash
-pip install django-modern-rest
-```
-
-There are several included extras:
-- `'django-modern-rest[msgspec]'` provides `msgspec` support
-  and the fastest json parsing, recommended to be **always** included
-- `'django-modern-rest[pydantic]'` provides `pydantic` support
 
 
 ## Testimonials
@@ -69,6 +55,23 @@ There are several included extras:
 > Using `django-modern-rest` has been a game-changer for my productivity. The strict type safety and schema validation for both requests and responses mean I spend less time debugging and more time building.
 
 — **[Josiah Kaviani](https://github.com/proofit404)**, Django core developer
+
+
+## Installation
+
+Works for:
+- СPython 3.11+
+- Django 4.2+
+
+```bash
+pip install django-modern-rest
+```
+
+There are several included extras:
+- `'django-modern-rest[msgspec]'` provides `msgspec` support
+  and the fastest json parsing, recommended to be **always** included
+- `'django-modern-rest[pydantic]'` provides `pydantic` support
+
 
 ## Example
 
@@ -99,13 +102,14 @@ The shortest example:
 ...         """All added props have the correct runtime and static types."""
 ...         assert self.parsed_headers.consumer == 'my-api'
 ...         return UserModel(uid=uuid.uuid4(), email=self.parsed_body.email)
+
 ```
 
 And then route this controller in your `urls.py`:
 
 ```python
 >>> from django.urls import include, path
->>> from django_modern_rest import Router
+>>> from django_modern_rest.routing import Router
 
 >>> router = Router([
 ...     path('user/', UserController.as_view(), name='users'),
@@ -113,16 +117,15 @@ And then route this controller in your `urls.py`:
 >>> urlpatterns = [
 ...     path('api/', include((router.urls, 'your_app'), namespace='api')),
 ... ]
+
 ```
 
 Done! Now you have your shiny API with 100% type
 safe validation and interactive docs.
 
-[The full documentation](https://django-modern-rest.rtfd.io)
-has everything you need to get started!
-
-[wemake-django-template](https://github.com/wemake-services/wemake-django-template)
-can be used to jump-start your new project with `django-modern-rest`!
+Next steps:
+- [The full documentation](https://django-modern-rest.rtfd.io) has everything you need to get started!
+- [wemake-django-template](https://github.com/wemake-services/wemake-django-template) can be used to jump-start your new project with `django-modern-rest`!
 
 
 ## License
